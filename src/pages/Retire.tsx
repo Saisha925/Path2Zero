@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
@@ -12,19 +12,18 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { ArrowLeft, Leaf, AlertTriangle, CheckCircle, Shield, Info, Lock } from "lucide-react";
+import { ArrowLeft, Leaf, AlertTriangle, Shield, Info, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { useDemoMode } from "@/contexts/DemoModeContext";
 import { calculateRetirementFees, PLATFORM_FEE_PERCENTAGE } from "@/lib/platformFees";
 import { supabase } from "@/integrations/supabase/client";
-import { useProfile } from "@/hooks/useProfile";
 
 const projectData = {
   id: "1",
   title: "Amazon Rainforest Conservation Project",
   image: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=400&h=300&fit=crop",
-  pricePerTonne: 18.50,
+  pricePerTonne: 18,
   country: "Brazil",
   category: "Avoided Deforestation",
   vintage: 2023,
@@ -34,13 +33,51 @@ const Retire = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, isLoading: authLoading } = useAuth();
-  const { profile } = useProfile();
-  const { isDemoMode, addRetirementRequest, demoRole } = useDemoMode();
+  const { isDemoMode, addRetirementRequest } = useDemoMode();
 
   const [isLoading, setIsLoading] = useState(false);
   const [tonnes, setTonnes] = useState(1);
   const [beneficiary, setBeneficiary] = useState("");
   const [message, setMessage] = useState("");
+  const [showPayment, setShowPayment] = useState(false);
+  const [stripe, setStripe] = useState<any>(null);
+  const [cardElement, setCardElement] = useState<any>(null);
+
+  // Initialize Stripe when payment form shows
+  useEffect(() => {
+    if (!showPayment) return;
+
+    if (!(globalThis as any).Stripe) {
+      toast.error("Stripe not loaded");
+      return;
+    }
+
+    const stripeInstance = (globalThis as any).Stripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+    setStripe(stripeInstance);
+
+    // Create and mount card element
+    const elements = stripeInstance.elements();
+    const card = elements.create("card", {
+      style: {
+        base: {
+          fontSize: "14px",
+          color: "#32325d",
+          "::placeholder": { color: "#aab7c4" },
+        },
+        invalid: { color: "#fa755a" },
+      },
+    });
+
+    const cardElementDiv = document.getElementById("card-element");
+    if (!cardElementDiv?.querySelector(".StripeElement")) {
+      card.mount("#card-element");
+      setCardElement(card);
+    }
+
+    return () => {
+      card.unmount();
+    };
+  }, [showPayment]);
 
   const fees = calculateRetirementFees(projectData.pricePerTonne, tonnes);
 
@@ -111,7 +148,109 @@ const Retire = () => {
     navigate("/profile");
   };
 
+  const handlePaymentClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!beneficiary) {
+      toast.error("Please enter a beneficiary name");
+      return;
+    }
+    setShowPayment(true);
+  };
+
+  const handlePayment = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!stripe || !cardElement) {
+      toast.error("Card element not loaded");
+      return;
+    }
+
+    setIsLoading(true);
+    const totalPrice = fees.totalAmountPaid;
+
+    try {
+      // Create payment intent
+      const response = await fetch("/server/api/create-payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: Math.round(totalPrice * 100),
+          currency: "USD",
+          projectId: id,
+          tonnes,
+          userId: user?.id || "demo-user",
+        }),
+      });
+
+      const data = await response.json();
+      if (data.clientSecret) {
+        // Create payment method from card element
+        const paymentMethodResult = await stripe.createPaymentMethod({
+          type: "card",
+          card: cardElement,
+        });
+
+        if (paymentMethodResult.error) {
+          toast.error("Card error: " + paymentMethodResult.error.message);
+          setIsLoading(false);
+          return;
+        }
+
+        // Confirm the payment with the payment method
+        const confirmResult = await stripe.confirmCardPayment(data.clientSecret, {
+          payment_method: paymentMethodResult.paymentMethod.id,
+        });
+
+        if (confirmResult.paymentIntent?.status === "succeeded") {
+          toast.success(`Payment processed for ${tonnes} tonnes!`);
+          setIsLoading(false);
+          setShowPayment(false);
+          // Continue with retirement
+          await handleRetire();
+        } else if (confirmResult.error) {
+          toast.error("Payment failed: " + confirmResult.error.message);
+          setIsLoading(false);
+        }
+      } else {
+        toast.error("Failed to create payment intent");
+        setIsLoading(false);
+      }
+    } catch (err) {
+      toast.error("Payment error: " + (err as Error).message);
+      setIsLoading(false);
+    }
+  };
+
   const isAuthenticated = user || isDemoMode;
+
+  const renderButtonContent = () => {
+    if (isLoading) {
+      return (
+        <span className="flex items-center gap-2">
+          <svg className="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          Processing...
+        </span>
+      );
+    }
+    if (!isAuthenticated) {
+      return (
+        <span className="flex items-center gap-2">
+          <Lock className="w-5 h-5" />
+          Log in to Retire
+        </span>
+      );
+    }
+    return (
+      <span className="flex items-center gap-2">
+        <Leaf className="w-5 h-5" />
+        Pay & Retire Carbon
+      </span>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -170,7 +309,7 @@ const Retire = () => {
                       type="number"
                       min={1}
                       value={tonnes}
-                      onChange={(e) => setTonnes(Math.max(1, parseInt(e.target.value) || 1))}
+                      onChange={(e) => setTonnes(Math.max(1, Number.parseInt(e.target.value) || 1))}
                       className="w-24 h-12 text-center text-lg font-semibold"
                       disabled={!isAuthenticated}
                     />
@@ -327,45 +466,46 @@ const Retire = () => {
                   <span>Verified & Certified Project</span>
                 </div>
 
-                {/* CTA */}
-                <Button
-                  className="w-full h-14 gradient-primary text-primary-foreground btn-glow font-semibold text-lg"
-                  onClick={handleRetire}
-                  disabled={isLoading || !isAuthenticated}
-                >
-                  {isLoading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                      Processing...
-                    </span>
-                  ) : !isAuthenticated ? (
-                    <span className="flex items-center gap-2">
-                      <Lock className="w-5 h-5" />
-                      Log in to Retire
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <Leaf className="w-5 h-5" />
-                      Retire Carbon
-                    </span>
-                  )}
-                </Button>
-
-                {!isAuthenticated && (
-                  <p className="text-xs text-center text-muted-foreground">
-                    <Link to="/login" className="text-primary hover:underline">Log in</Link> or{" "}
-                    <Link to="/register" className="text-primary hover:underline">sign up</Link> to continue
-                  </p>
-                )}
-
-                {isAuthenticated && (
-                  <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                    <CheckCircle className="w-4 h-4 mt-0.5 text-primary shrink-0" />
-                    <span>
-                      By retiring, you're permanently removing these carbon credits from
-                      circulation and contributing to climate action.
-                    </span>
+                {/* Payment Section */}
+                {showPayment ? (
+                  <div className="space-y-3 p-4 rounded-lg bg-muted/50">
+                    <h4 className="font-semibold text-sm">Payment Details</h4>
+                    <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800">
+                      Test card: 4242 4242 4242 4242 (any expiry, any CVC)
+                    </div>
+                    <div id="card-element" className="border border-input rounded p-3 bg-background" />
+                    <div className="space-y-2 text-sm">
+                      <p className="text-muted-foreground">
+                        Total: <span className="font-bold text-foreground">${fees.totalAmountPaid.toFixed(2)}</span>
+                      </p>
+                    </div>
+                    <Button
+                      onClick={handlePayment}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Processing..." : "Complete Payment"}
+                    </Button>
+                    <Button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setShowPayment(false);
+                      }}
+                      variant="outline"
+                      className="w-full"
+                      disabled={isLoading}
+                    >
+                      Cancel
+                    </Button>
                   </div>
+                ) : (
+                  <Button
+                    className="w-full h-14 gradient-primary text-primary-foreground btn-glow font-semibold text-lg"
+                    onClick={handlePaymentClick}
+                    disabled={isLoading || !isAuthenticated}
+                  >
+                    {renderButtonContent()}
+                  </Button>
                 )}
               </div>
             </div>

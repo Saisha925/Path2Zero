@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, Calendar, Shield } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { MapPin, Calendar, Shield, ShoppingCart } from "lucide-react";
+import { toast } from "sonner";
 
 interface ProjectCardProps {
   id: string;
@@ -25,6 +28,33 @@ export const ProjectCard = ({
   vintage,
   verified,
 }: ProjectCardProps) => {
+  const [tonnes, setTonnes] = useState(1);
+  const [showPayment, setShowPayment] = useState(false);
+
+  const handlePaymentClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowPayment(true);
+  };
+
+  const handleBuyNow = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!tonnes || tonnes < 1) {
+      toast.error("Please enter a valid quantity");
+      return;
+    }
+
+    const totalPrice = pricePerTonne * tonnes;
+    toast.info(`${tonnes} tonnes × $${pricePerTonne.toFixed(2)} = $${totalPrice.toFixed(2)}`, {
+      description: "Redirecting to checkout...",
+    });
+    
+    // Redirect to retire page where full payment form is available
+    globalThis.location.href = `/marketplace/${id}`;
+  };
+
   return (
     <Link to={`/marketplace/${id}`}>
       <article className="group glass-card rounded-2xl overflow-hidden card-hover cursor-pointer h-full flex flex-col">
@@ -56,7 +86,7 @@ export const ProjectCard = ({
           </p>
 
           {/* Tags */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 mb-4">
             <Badge variant="secondary" className="text-xs">
               <MapPin className="w-3 h-3 mr-1" />
               {country}
@@ -68,6 +98,56 @@ export const ProjectCard = ({
               <Calendar className="w-3 h-3 mr-1" />
               {vintage}
             </Badge>
+          </div>
+
+          {/* Payment Section */}
+          <div className="mt-auto pt-4 border-t border-border space-y-3">
+            {showPayment ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={tonnes}
+                    onChange={(e) => setTonnes(Math.max(1, Number(e.target.value)))}
+                    className="flex-1 px-2 py-1 text-sm border rounded bg-muted text-foreground"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span className="text-xs font-medium text-muted-foreground">tonnes</span>
+                </div>
+                <div className="text-sm font-bold">
+                  ${(pricePerTonne * tonnes).toFixed(2)}
+                </div>
+                <Button 
+                  onClick={handleBuyNow}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white"
+                  size="sm"
+                >
+                  Pay Now
+                </Button>
+                <Button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowPayment(false);
+                  }}
+                  variant="outline"
+                  className="w-full"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <Button 
+                onClick={handlePaymentClick}
+                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                size="sm"
+              >
+                <ShoppingCart className="w-4 h-4 mr-2" />
+                Buy Credits
+              </Button>
+            )}
           </div>
         </div>
       </article>

@@ -32,7 +32,7 @@ The project delivers multiple benefits beyond carbon sequestration:
 - Watershed protection for millions of downstream residents
 - Preservation of medicinal plants and genetic resources`,
   image: "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=1200&h=600&fit=crop",
-  pricePerTonne: 18.50,
+  pricePerTonne: 18,
   availableTonnes: 125000,
   country: "Brazil",
   category: "Avoided Deforestation",

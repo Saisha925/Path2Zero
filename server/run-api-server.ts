@@ -3,9 +3,12 @@
  * Vite proxies /server to this server when using the dev script.
  */
 import { createServer } from "node:http";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { config } from "dotenv";
+
+// Load environment variables from backend/.env
+config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "backend", ".env") });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.API_PORT) || 3001;
@@ -14,6 +17,7 @@ const routes: Record<string, string> = {
   "/server/api/authenticate-certificate": path.join(__dirname, "api", "authenticate-certificate.ts"),
   "/server/api/list-certificate": path.join(__dirname, "api", "list-certificate.ts"),
   "/server/api/marketplace-listings": path.join(__dirname, "api", "marketplace-listings.ts"),
+  "/server/api/create-payment-intent": path.join(__dirname, "api", "create-payment-intent.ts"),
 };
 
 createServer(async (req, res) => {
